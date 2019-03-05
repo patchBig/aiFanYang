@@ -101,3 +101,397 @@ $.ajax({
 ```
 
 ### 2. CORS
+
+CORS 需要浏览器和后端同时支持。IE 8 和 9 需要通过 XDomainRequest 来实现。
+
+浏览器会自动进行 CORS 通信，实现 CORS 通信的关键是后端。只要后端实现了 CORS，就实现了跨域。
+
+服务端设置 Access-Control-Allow-Origin 就可以开启 CORS。 该属性表示哪些域名可以访问资源，如果设置通配符则表示所有网站都可以访问资源。
+
+#### 复杂请求的CORS请求，会在正式通信之前，增加一次HTTP查询请求，称为"预检"请求,该请求是 option 方法的，通过该请求来知道服务端是否允许跨域请求。
+
+完整复杂请求的例子：
+
+```html
+// index.html
+let xhr = new XMLHttpRequest()
+document.cookie = 'name=xiamen' // cookie不能跨域
+xhr.withCredentials = true // 前端设置是否带cookie
+xhr.open('PUT', 'http://localhost:4000/getData', true)
+xhr.setRequestHeader('name', 'xiamen')
+xhr.onreadystatechange = function() {
+  if (xhr.readyState === 4) {
+    if ((xhr.status >= 200 && xhr.status < 300) || xhr.status === 304) {
+      console.log(xhr.response)
+      //得到响应头，后台需设置Access-Control-Expose-Headers
+      console.log(xhr.getResponseHeader('name'))
+    }
+  }
+}
+xhr.send()
+```
+
+```js
+//server1.js
+let express = require('express');
+let app = express();
+app.use(express.static(__dirname));
+app.listen(3000);
+```
+
+```js
+//server2.js
+let express = require('express')
+let app = express()
+let whiteList = ['http://localhost:3000'] //设置白名单
+app.use(function(req, res, next) {
+  let origin = req.headers.origin
+  if (whiteList.includes(origin)) {
+    // 设置哪个源可以访问我
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    // 允许携带哪个头访问我
+    res.setHeader('Access-Control-Allow-Headers', 'name')
+    // 允许哪个方法访问我
+    res.setHeader('Access-Control-Allow-Methods', 'PUT')
+    // 允许携带cookie
+    res.setHeader('Access-Control-Allow-Credentials', true)
+    // 预检的存活时间
+    res.setHeader('Access-Control-Max-Age', 6)
+    // 允许返回的头
+    res.setHeader('Access-Control-Expose-Headers', 'name')
+    if (req.method === 'OPTIONS') {
+      res.end() // OPTIONS请求不做任何处理
+    }
+  }
+  next()
+})
+app.put('/getData', function(req, res) {
+  console.log(req.headers)
+  res.setHeader('name', 'jw') //返回一个响应头，后台需设置
+  res.end('我不爱你')
+})
+app.get('/getData', function(req, res) {
+  console.log(req.headers)
+  res.end('我不爱你')
+})
+app.use(express.static(__dirname))
+app.listen(4000)
+```
+
+### postMessage
+
+postMessage是HTML5 XMLHttpRequest Level 2中的API，且是为数不多可以跨域操作的window属性之一，它可用于解决以下方面的问题:
+
+- 页面和其打开的新窗口的数据传递
+- 多窗口之间消息传递
+- 页面与嵌套的iframe消息传递
+- 上面三个场景的跨域数据传递
+
+postMessage()方法允许来自不同源的脚本采用异步方式进行有限的通信，可以实现跨文本档、多窗口、跨域消息传递。
+
+> otherWindow.postMessage(message, targetOrigin, [transfer]);
+
+- message: 将要发送到其他 window的数据
+- targetOrigin：通过窗口的origin属性来指定哪些窗口能接收到消息事件，其值可以是字符串"*"（表示无限制）或者一个URI。在发送消息的时候，如果目标窗口的协议、主机地址或端口这三者的任意一项不匹配targetOrigin提供的值，那么消息就不会被发送；只有三者完全匹配，消息才会被发送。
+- transfer(可选)：是一串和message 同时传递的 Transferable 对象. 这些对象的所有权将被转移给消息的接收方，而发送一方将不再保有所有权。
+
+```html
+// a.html  //等它加载完触发一个事件
+<iframe
+  src="http://localhost:4000/b.html"
+  frameborder="0"
+  id="frame"
+  onload="load()"
+>
+</iframe>
+
+```
+
+```javascript
+//内嵌在http://localhost:3000/a.html
+<script>
+  function load() {
+    let frame = document.getElementById('frame')
+    frame.contentWindow.postMessage('我爱你', 'http://localhost:4000') //发送数据
+    window.onmessage = function(e) { //接受返回数据
+      console.log(e.data) //我不爱你
+    }
+  }
+</script>
+// b.html
+window.onmessage = function(e) {
+  console.log(e.data) //我爱你
+  e.source.postMessage('我不爱你', e.origin)
+}
+```
+
+### websocket
+
+Websocket是 HTML5 的一个**持久化**的协议，它实现了浏览器与服务器的**全双工通信**，同时也是跨域的一种解决方案。WebSocket 和 HTTP 都是**应用层协议**，都基于 **TCP** 协议。但是 WebSocket 是一种双向通信协议，在建立连接之后，WebSocket 的 server 与 client 都能主动向对方发送或接收数据。同时，WebSocket 在建立连接时需要借助 HTTP 协议，连接建立好了之后 client 与 server 之间的双向通信就与 HTTP 无关了。
+
+使用Socket.io，它很好地封装了webSocket接口
+
+```html
+// socket.html
+<script>
+  let socket = new WebSocket('ws://localhost:3000');
+  socket.onopen = function () {
+    socket.send('我爱你');//向服务器发送数据
+  }
+  socket.onmessage = function (e) {
+    console.log(e.data);//接收服务器返回的数据
+  }
+</script>
+```
+
+```javascript
+// server.js
+let express = require('express');
+let app = express();
+let WebSocket = require('ws');//记得安装ws
+let wss = new WebSocket.Server({port:3000});
+wss.on('connection',function(ws) {
+  ws.on('message', function (data) {
+    console.log(data);
+    ws.send('我不爱你')
+  });
+})
+```
+
+### Node中间件代理(两次跨域)
+
+1. 接受客户端请求
+2. 将请求转发给服务器
+3. 拿到服务器响应数据
+4. 将响应转发给客户端
+
+```html
+// index.html(http://127.0.0.1:5500)
+<script src="https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js"></script>
+<script>
+  $.ajax({
+    url: 'http://localhost:3000',
+    type: 'post',
+    data: { name: 'xiamen', password: '123456' },
+    contentType: 'application/json;charset=utf-8',
+    success: function(result) {
+      console.log(result) // {"title":"fontend","password":"123456"}
+    },
+    error: function(msg) {
+      console.log(msg)
+    }
+  })
+</script>
+```
+
+```javascript
+// server1.js 代理服务器(http://localhost:3000)
+const http = require('http')
+// 第一步：接受客户端请求
+const server = http.createServer((request, response) => {
+// 代理服务器，直接和浏览器直接交互，需要设置CORS 的首部字段
+response.writeHead(200, {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': '*',
+  'Access-Control-Allow-Headers': 'Content-Type'
+})
+// 第二步：将请求转发给服务器
+const proxyRequest = http
+  .request(
+    {
+      host: '127.0.0.1',
+      port: 4000,
+      url: '/',
+      method: request.method,
+      headers: request.headers
+    },
+    serverResponse => {
+      // 第三步：收到服务器的响应
+      var body = ''
+      serverResponse.on('data', chunk => {
+        body += chunk
+      })
+      serverResponse.on('end', () => {
+        console.log('The data is ' + body)
+        // 第四步：将响应结果转发给浏览器
+        response.end(body)
+      })
+    }
+  )
+  .end()
+})
+server.listen(3000, () => {
+  console.log('The proxyServer is running at http://localhost:3000')
+})
+```
+
+```javascript
+// server2.js(http://localhost:4000)
+const http = require('http')
+const data = { title: 'fontend', password: '123456' }
+const server = http.createServer((request, response) => {
+  if (request.url === '/') {
+    response.end(JSON.stringify(data))
+  }
+})
+server.listen(4000, () => {
+  console.log('The server is running at http://localhost:4000')
+})
+```
+
+### nginx反向代理
+
+通过 nginx 配置一个代理服务器（域名与 domain1 相同，端口不同）做跳板机，反向代理访问 domain2 接口，并且可以顺便修改 cookie 中domain 信息，方便当前域 cookie 写入，实现跨域登录。
+
+先下载nginx，然后将nginx目录下的nginx.conf修改如下:
+
+```js
+// proxy服务器
+server {
+    listen       81;
+    server_name  www.domain1.com;
+    location / {
+        proxy_pass   http://www.domain2.com:8080;  #反向代理
+        proxy_cookie_domain www.domain2.com www.domain1.com; #修改cookie里域名
+        index  index.html index.htm;
+
+        # 当用webpack-dev-server等中间件代理接口访问nignx时，此时无浏览器参与，故没有同源限制，下面的跨域配置可不启用
+        add_header Access-Control-Allow-Origin http://www.domain1.com;  #当前端只跨域不带cookie时，可为*
+        add_header Access-Control-Allow-Credentials true;
+    }
+}
+```
+
+最后通过命令行nginx -s reload启动nginx
+
+```html
+// index.html
+var xhr = new XMLHttpRequest();
+// 前端开关：浏览器是否读写cookie
+xhr.withCredentials = true;
+// 访问nginx中的代理服务器
+xhr.open('get', 'http://www.domain1.com:81/?user=admin', true);
+xhr.send();
+```
+
+```js
+// server.js
+var http = require('http');
+var server = http.createServer();
+var qs = require('querystring');
+server.on('request', function(req, res) {
+    var params = qs.parse(req.url.substring(2));
+    // 向前台写cookie
+    res.writeHead(200, {
+        'Set-Cookie': 'l=a123456;Path=/;Domain=www.domain2.com;HttpOnly'   // HttpOnly:脚本无法读取
+    });
+    res.write(JSON.stringify(params));
+    res.end();
+});
+server.listen('8080');
+console.log('Server is running at port 8080...');
+```
+
+### window.name + iframe
+
+window.name属性的独特之处：name值在不同的页面（甚至不同域名）加载后依旧存在，并且可以支持非常长的 name 值（2MB）。
+
+其中a.html和b.html是同域的，都是 `http://localhost:3000` ;而c.html是 `http://localhost:4000`
+b.html为中间代理页，与a.html同域，内容为空
+
+```html
+// a.html(http://localhost:3000/b.html)
+<iframe src="http://localhost:4000/c.html" frameborder="0" onload="load()" id="iframe"></iframe>
+<script>
+  let first = true
+  // onload事件会触发2次，第1次加载跨域页，并留存数据于window.name
+  function load() {
+    if(first){
+    // 第1次onload(跨域页)成功后，切换到同域代理页面
+      let iframe = document.getElementById('iframe');
+      iframe.src = 'http://localhost:3000/b.html';
+      first = false;
+    }else{
+    // 第2次onload(同域b.html页)成功后，读取同域window.name中数据
+      console.log(iframe.contentWindow.name);
+    }
+  }
+</script>
+```
+
+```js
+ // c.html(http://localhost:4000/c.html)
+  <script>
+    window.name = '我不爱你'  
+  </script>
+```
+
+总结：通过iframe的src属性由外域转向本地域，跨域数据即由iframe的window.name从外域传递到本地域。这个就巧妙地绕过了浏览器的跨域访问限制，但同时它又是安全操作。
+
+### location.hash + iframe
+
+一开始a.html给c.html传一个hash值，然后c.html收到hash值后，再把hash值传递给b.html，最后b.html将结果放到a.html的hash值中。
+同样的，a.html和b.html是同域的，都是`http://localhost:3000`;而c.html是`http://localhost:4000`
+
+```html
+// a.html
+<iframe src="http://localhost:4000/c.html#iloveyou"></iframe>
+<script>
+  //检测hash的变化
+  window.onhashchange = function () {
+    console.log(location.hash);
+  }
+</script>
+
+ // b.html
+<script>
+  window.parent.parent.location.hash = location.hash
+  //b.html将结果放到a.html的hash值中，b.html可通过parent.parent访问a.html页面
+</script>
+
+ // c.html
+ console.log(location.hash);
+let iframe = document.createElement('iframe');
+iframe.src = 'http://localhost:3000/b.html#idontloveyou';
+document.body.appendChild(iframe);
+```
+
+### document.domain + iframe
+
+该方式只能用于二级域名相同的情况下，比如 a.test.com 和 b.test.com 适用于该方式。
+
+只需要给页面添加 document.domain ='test.com' 表示二级域名都相同就可以实现跨域。
+
+实现原理：两个页面都通过js强制设置 document.domain 为基础主域，就实现了同域。
+
+例子：页面a.zf1.cn:3000/a.html获取页面b.zf1.cn:3000/b.html中a的值
+
+```html
+// a.html
+<body>
+ helloa
+  <iframe src="http://b.zf1.cn:3000/b.html" frameborder="0" onload="load()" id="frame"></iframe>
+  <script>
+    document.domain = 'zf1.cn'
+    function load() {
+      console.log(frame.contentWindow.a);
+    }
+  </script>
+</body>
+
+// b.html
+<body>
+   hellob
+   <script>
+     document.domain = 'zf1.cn'
+     var a = 100;
+   </script>
+</body>
+```
+
+### 总结
+
+- CORS支持所有类型的HTTP请求，是跨域HTTP请求的根本解决方案
+- JSONP只支持GET请求，JSONP的优势在于支持老式浏览器，以及可以向不支持CORS的网站请求数据。
+- 不管是Node中间件代理还是nginx反向代理，主要是通过同源策略对服务器不加限制。
+- 日常工作中，用得比较多的跨域方案是cors和nginx反向代理
